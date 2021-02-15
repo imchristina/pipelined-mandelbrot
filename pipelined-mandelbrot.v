@@ -1,12 +1,79 @@
-module mandelbrot (
-	input clk
+// Using fixed point, 1 sign bit + 3 integer bits, 28 decimal bits
+// Coordinate input is 11x11 bits for a maximum output resolution of 2048x2048
+
+module mandelbrot #(
+	parameter [10:0] RESX = 0,
+	parameter [10:0] RESY = 0
+) (
+	input clk,
+	input [10:0] xin,
+	input [10:0] yin,
+	output in_enable,
+	output [10:0] xout,
+	output [10:0] yout,
+	output [31:0] v
 );
-	reg [31:0] x,y;
+	reg [10:0] x,y;
+
 	always @(posedge clk) begin
-		
+		x <= xin;
+		y <= yin;
 	end
+
+	wire [31:0] stage_0_xout, stage_0_yout;
+	mandelbrot_input_0 #(.RESX(RESX), .RESY(RESY)) input_0 (
+		.xin(x),
+		.yin(y),
+		.xout(stage_0_xout),
+		.yout(stage_0_yout)
+	);
 endmodule
 
+// Convert input to normalized fixed point
+module mandelbrot_input_0 #(
+	parameter [10:0] RESX = 0,
+	parameter [10:0] RESY = 0
+	) (
+	input [10:0] xin,
+	input [10:0] yin,
+	output [31:0] xout,
+	output [31:0] yout
+);
+	wire [31:0] xfxp, yfxp;
+	assign xfxp = {1'b0,xin,20'd0};
+	assign yfxp = {1'b0,yin,20'd0};
+
+	wire [31:0] RESXFXP, RESYFXP;
+	assign RESXFXP = {1'b0,RESX,20'd0};
+	assign RESYFXP = {1'b0,RESY,20'd0};
+
+	assign xout = xfxp * (32'd1/RESXFXP);
+	assign yout = yfxp * (32'd1/RESYFXP);
+endmodule
+
+// x*3.5, y*2
+module mandelbrot_input_1 (
+	input [31:0] xin,
+	input [31:0] yin,
+	output [31:0] xout,
+	output [31:0] yout
+);
+	mandelbrot_fxp_mul xin_mul (xin, {1'b0,3'd3,1'b1,27'd0}, xout);
+	assign yout = yin*2'd2;
+endmodule
+
+// x-2.5, y-1
+module mandelbrot_input_2 (
+	input [31:0] xin,
+	input [31:0] yin,
+	output [31:0] xout,
+	output [31:0] yout
+);
+	assign xout = xin - {1'b0,3'd2,1'b1,27'd0};
+	assign yout = yin - {1'b0,3'd1,28'd0};
+endmodule
+
+// x*x, y*y, x*y
 module mandelbrot_compute_0 (
 	input [31:0] x,
 	input [31:0] y,
@@ -19,6 +86,7 @@ module mandelbrot_compute_0 (
 	mandelbrot_fxp_mul xy_mul (x, y, xy);
 endmodule
 
+// xx-yy, 2xy, xx+yy
 module mandelbrot_compute_1 (
 	input [31:0] xx,
 	input [31:0] yy,
@@ -27,11 +95,12 @@ module mandelbrot_compute_1 (
 	output [31:0] xy2,
 	output [31:0] xxaddyy
 );
-	assign xxsubyy = xxin - yyin;
-	assign xy2 = xyin * 2'd2;
-	assign xxaddyy = xxin + yyin;
+	assign xxsubyy = xx - yy;
+	assign xy2 = xy * 2'd2;
+	assign xxaddyy = xx + yy;
 endmodule
 
+// xxaddyy+x0, 2xy+y0
 module mandelbrot_compute_2 (
 	input [31:0] xxsubyy,
 	input [31:0] xy2,
@@ -44,21 +113,12 @@ module mandelbrot_compute_2 (
 	assign y = xy2 + y0;
 endmodule
 
-module mandelbrot_loopback (
+// TODO Just for fun, a reorder buffer could be added to the output
+module mandelbrot_writeback (
 	input [31:0] xxaddyy,
 	input [31:0] imax
 );
-	
-endmodule
 
-module mandelbrot_input_0 (
-	input [10:0] xin,
-	input [10:0] yin,
-	output [31:0] xout,
-	output [31:0] yout
-);
-	assign xout = xin*3.5;
-	assign yout = y*2'd2;
 endmodule
 
 module mandelbrot_fxp_mul (
@@ -71,22 +131,16 @@ module mandelbrot_fxp_mul (
 	assign c = result[63:32];
 endmodule
 
-module mandelbrot_fifo #(parameter SIZE = 16) (
+module mandelbrot_fifo #(parameter SIZE = 15) (
 	input [31:0] clk,
 	input [31:0] in,
 	output [31:0] out
 );
 	reg [31:0] mem [SIZE:0];
-	reg [4:0] p = 4'd0;
+	reg [3:0] p = 4'd0;
 	always @(posedge clk) begin
 		mem[p] <= in;
 		p <= (p + 1'b1) % SIZE-1;
 	end
 	assign out = mem[p+1'b1];
-endmodule
-
-module testbench (
-
-);
-
 endmodule
