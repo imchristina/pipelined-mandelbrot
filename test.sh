@@ -1,4 +1,4 @@
-filename="pipelined-mandelbrot.v"
+filename="testbench.v"
 
 iverilog -s testbench -o testbench.vvp $filename
 vvp testbench.vvp

@@ -13,19 +13,73 @@ module mandelbrot #(
 	output [10:0] yout,
 	output [31:0] v
 );
-	reg [10:0] x,y;
+	// Inter-stage connections
+	reg [10:0] input_0_xin,input_0_yin;
+	wire [31:0] input_0_xout, input_0_yout;
 
+	reg [31:0] input_1_xin,input_1_yin;
+	wire [31:0] input_1_xout,input_1_yout;
+
+	reg [31:0] input_2_xin,input_2_yin;
+	wire [31:0] input_2_xout,input_2_yout;
+
+	reg [31:0] compute_0_xin,compute_0_yin;
+	wire [31:0] compute_0_xxout,compute_0_yyout,compute_0_xyout;
+
+	reg [31:0] compute_1_xxin,compute_1_yyin,compute_1_xyin;
+	wire [31:0] compute_1_xxout,compute_1_yyout,compute_1_xyout;
+
+	// Make everything sync up
 	always @(posedge clk) begin
-		x <= xin;
-		y <= yin;
+		input_0_xin <= xin;
+		input_0_yin <= yin;
+
+		input_1_xin <= input_0_xout;
+		input_1_yin <= input_0_yout;
+
+		input_2_xin <= input_1_xout;
+		input_2_yin <= input_1_yout;
+
+		compute_0_xin <= input_2_xout;
+		compute_0_yin <= input_2_yout;
 	end
 
-	wire [31:0] stage_0_xout, stage_0_yout;
 	mandelbrot_input_0 #(.RESX(RESX), .RESY(RESY)) input_0 (
-		.xin(x),
-		.yin(y),
-		.xout(stage_0_xout),
-		.yout(stage_0_yout)
+		.xin(input_0_xin),
+		.yin(input_0_yin),
+		.xout(input_0_xout),
+		.yout(input_0_yout)
+	);
+
+	mandelbrot_input_1 input_1 (
+		.xin(input_1_xin),
+		.yin(input_1_yin),
+		.xout(input_1_xout),
+		.yout(input_1_yout)
+	);
+
+	mandelbrot_input_2 input_2 (
+		.xin(input_2_xin),
+		.yin(input_2_yin),
+		.xout(input_2_xout),
+		.yout(input_2_yout)
+	);
+
+	mandelbrot_compute_0 compute_0 (
+		.x(compute_0_xin),
+		.y(compute_0_yin),
+		.xx(compute_0_xxout),
+		.yy(compute_0_yyout),
+		.xy(compute_0_xyout)
+	);
+
+	mandelbrot_compute_1 compute_1 (
+		.xx(compute_1_xxin),
+		.yy(compute_1_yyin),
+		.xy(compute_1_xyin),
+		.xxsubyy(),
+		.xy2(),
+		.xxaddyy()
 	);
 endmodule
 
@@ -39,16 +93,18 @@ module mandelbrot_input_0 #(
 	output [31:0] xout,
 	output [31:0] yout
 );
-	wire [31:0] xfxp, yfxp;
+	wire [31:0] xfxp,yfxp;
 	assign xfxp = {1'b0,xin,20'd0};
 	assign yfxp = {1'b0,yin,20'd0};
 
-	wire [31:0] RESXFXP, RESYFXP;
+	wire [31:0] RESXFXP,RESYFXP,XCOEFF,YCOEFF;
 	assign RESXFXP = {1'b0,RESX,20'd0};
 	assign RESYFXP = {1'b0,RESY,20'd0};
+	assign XCOEFF = {1'b0,3'd1,28'd0}/RESXFXP;
+	assign YCOEFF = {1'b0,3'd1,28'd0}/RESYFXP;
 
-	assign xout = xfxp * (32'd1/RESXFXP);
-	assign yout = yfxp * (32'd1/RESYFXP);
+	assign xout = xfxp * XCOEFF;
+	assign yout = yfxp * YCOEFF;
 endmodule
 
 // x*3.5, y*2
@@ -131,6 +187,7 @@ module mandelbrot_fxp_mul (
 	assign c = result[63:32];
 endmodule
 
+// It'd be better to use the vendor's FIFO IP, but it doesn't matter here really
 module mandelbrot_fifo #(parameter SIZE = 15) (
 	input [31:0] clk,
 	input [31:0] in,
