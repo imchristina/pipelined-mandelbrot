@@ -27,7 +27,10 @@ module mandelbrot #(
 	wire [31:0] compute_0_xxout,compute_0_yyout,compute_0_xyout;
 
 	reg [31:0] compute_1_xxin,compute_1_yyin,compute_1_xyin;
-	wire [31:0] compute_1_xxout,compute_1_yyout,compute_1_xyout;
+	wire [31:0] compute_1_xxsubyyout,compute_1_xy2out,compute_1_xxaddyyout;
+
+	reg [31:0] compute_2_xxsubyyin,compute_2_xy2in,compute_2_x0in,compute_2_y0in;
+	wire [31:0] compute_2_xout,compute_2_yout;
 
 	// Make everything sync up
 	always @(posedge clk) begin
@@ -42,6 +45,14 @@ module mandelbrot #(
 
 		compute_0_xin <= input_2_xout;
 		compute_0_yin <= input_2_yout;
+
+		compute_1_xxin <= compute_0_xxout;
+		compute_1_yyin <= compute_0_yyout;
+		compute_1_xyin <= compute_0_xyout;
+
+		compute_2_xxsubyyin <= compute_1_xxsubyyout;
+		compute_2_xy2in	<= compute_1_xy2out;
+		//compute_2_x0in <= ;
 	end
 
 	mandelbrot_input_0 #(.RESX(RESX), .RESY(RESY)) input_0 (
@@ -77,9 +88,18 @@ module mandelbrot #(
 		.xx(compute_1_xxin),
 		.yy(compute_1_yyin),
 		.xy(compute_1_xyin),
-		.xxsubyy(),
-		.xy2(),
-		.xxaddyy()
+		.xxsubyy(compute_1_xxsubyyout),
+		.xy2(compute_1_xy2out),
+		.xxaddyy(compute_1_xxaddyyout)
+	);
+
+	mandelbrot_compute_2 compute_2 (
+		.xxsubyy(compute_2_xxsubyyin),
+		.xy2(compute_2_xy2in),
+		.x0(compute_2_x0in),
+		.y0(compute_2_y0in),
+		.x(compute_2_xout),
+		.y(compute_2_yout)
 	);
 endmodule
 
