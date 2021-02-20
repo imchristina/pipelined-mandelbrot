@@ -23,28 +23,51 @@ module mandelbrot #(
 	reg [31:0] input_2_xin,input_2_yin;
 	wire [31:0] input_2_xout,input_2_yout;
 
+	reg dispatch_retin;
+	reg [31:0] dispatch_xin,dispatch_yin,dispatch_retxin,dispatch_retyin,
+		dispatch_retiin;
+	wire [31:0] dispatch_xout,dispatch_yout,dispatch_iout;
+
 	reg [31:0] compute_0_xin,compute_0_yin;
 	wire [31:0] compute_0_xxout,compute_0_yyout,compute_0_xyout;
 
 	reg [31:0] compute_1_xxin,compute_1_yyin,compute_1_xyin;
-	wire [31:0] compute_1_xxsubyyout,compute_1_xy2out,compute_1_xxaddyyout;
+	wire [31:0] compute_1_xxsubyyout,compute_1_xy2out;
 
-	reg [31:0] compute_2_xxsubyyin,compute_2_xy2in,compute_2_x0in,compute_2_y0in;
-	wire [31:0] compute_2_xout,compute_2_yout;
+	reg [31:0] compute_2_xxsubyyin,compute_2_xy2in;
+	wire [31:0] compute_2_x0in,compute_2_y0in,compute_2_xout,compute_2_yout;
 
-	// Make everything sync up
+	reg [31:0] compute_3_xin,compute_3_yin;
+	wire [31:0] compute_3_xxout,compute_3_yyout;
+
+	reg [31:0] compute_4_xxin,compute_4_yyin;
+	wire [31:0] compute_4_xxaddyyout;
+
+	reg [31:0] writeback_xxaddyyin;
+	wire writeback_retout;
+	wire [31:0] writeback_ippout,writeback_iin;
+
+	// Clocked logic
 	always @(posedge clk) begin
-		input_0_xin <= xin;
-		input_0_yin <= yin;
+		if (~writeback_retout) begin
+			input_0_xin <= xin;
+			input_0_yin <= yin;
 
-		input_1_xin <= input_0_xout;
-		input_1_yin <= input_0_yout;
+			input_1_xin <= input_0_xout;
+			input_1_yin <= input_0_yout;
 
-		input_2_xin <= input_1_xout;
-		input_2_yin <= input_1_yout;
+			input_2_xin <= input_1_xout;
+			input_2_yin <= input_1_yout;
 
-		compute_0_xin <= input_2_xout;
-		compute_0_yin <= input_2_yout;
+			dispatch_xin <= input_2_xout;
+			dispatch_yin <= input_2_yout;
+		end
+
+		dispatch_retin <= writeback_retout;
+		dispatch_retiin <= writeback_ippout;
+
+		compute_0_xin <= dispatch_xout;
+		compute_0_yin <= dispatch_yout;
 
 		compute_1_xxin <= compute_0_xxout;
 		compute_1_yyin <= compute_0_yyout;
@@ -52,10 +75,25 @@ module mandelbrot #(
 
 		compute_2_xxsubyyin <= compute_1_xxsubyyout;
 		compute_2_xy2in	<= compute_1_xy2out;
-		//compute_2_x0in <= ;
+
+		compute_3_xin <= compute_2_xout;
+		compute_3_yin <= compute_2_yout;
+
+		compute_4_xxin <= compute_3_xxout;
+		compute_4_yyin <= compute_3_yyout;
+
+		writeback_xxaddyyin <= compute_4_xxaddyyout;
 	end
 
-	mandelbrot_input_0 #(.RESX(RESX), .RESY(RESY)) input_0 (
+	// FIFOs
+	mandelbrot_fifo #(3) x0delay (clk,compute_0_xin,compute_2_x0in);
+	mandelbrot_fifo #(3) y0delay (clk,compute_0_yin,compute_2_y0in);
+	mandelbrot_fifo #(6) idelay (clk,dispatch_iout,writeback_iin);
+	mandelbrot_fifo #(4) retxdelay (clk,compute_2_xout,dispatch_retxin);
+	mandelbrot_fifo #(4) retydelay (clk,compute_2_yout,dispatch_retyin);
+
+	// Modules
+	mandelbrot_input_0 #(RESX, RESY) input_0 (
 		.xin(input_0_xin),
 		.yin(input_0_yin),
 		.xout(input_0_xout),
@@ -76,6 +114,18 @@ module mandelbrot #(
 		.yout(input_2_yout)
 	);
 
+	mandelbrot_dispatch dispatch (
+		.xin(dispatch_xin),
+		.yin(dispatch_yin),
+		.ret(dispatch_retin),
+		.retx(dispatch_retxin),
+		.rety(dispatch_retyin),
+		.reti(dispatch_retiin),
+		.xout(dispatch_xout),
+		.yout(dispatch_yout),
+		.iout(dispatch_iout)
+	);
+
 	mandelbrot_compute_0 compute_0 (
 		.x(compute_0_xin),
 		.y(compute_0_yin),
@@ -89,8 +139,7 @@ module mandelbrot #(
 		.yy(compute_1_yyin),
 		.xy(compute_1_xyin),
 		.xxsubyy(compute_1_xxsubyyout),
-		.xy2(compute_1_xy2out),
-		.xxaddyy(compute_1_xxaddyyout)
+		.xy2(compute_1_xy2out)
 	);
 
 	mandelbrot_compute_2 compute_2 (
@@ -101,6 +150,29 @@ module mandelbrot #(
 		.x(compute_2_xout),
 		.y(compute_2_yout)
 	);
+
+	mandelbrot_compute_3 compute_3 (
+		.xin(compute_3_xin),
+		.yin(compute_3_yin),
+		.xout(compute_3_xxout),
+		.yout(compute_3_yyout)
+	);
+
+	mandelbrot_compute_4 compute_4 (
+		.xin(compute_4_xxin),
+		.yin(compute_4_yyin),
+		.xxaddyy(compute_4_xxaddyyout)
+	);
+
+	mandelbrot_writeback writeback (
+		.xxaddyy(writeback_xxaddyyin),
+		.i(writeback_iin),
+		.ret(writeback_retout),
+		.ipp(writeback_ippout)
+	);
+
+	assign in_enable = ~writeback_retout;
+	assign v = dispatch_retiin;
 endmodule
 
 // Convert input to normalized fixed point
@@ -162,18 +234,16 @@ module mandelbrot_compute_0 (
 	mandelbrot_fxp_mul xy_mul (x, y, xy);
 endmodule
 
-// xx-yy, 2xy, xx+yy
+// xx-yy, 2xy
 module mandelbrot_compute_1 (
 	input [31:0] xx,
 	input [31:0] yy,
 	input [31:0] xy,
 	output [31:0] xxsubyy,
-	output [31:0] xy2,
-	output [31:0] xxaddyy
+	output [31:0] xy2
 );
 	assign xxsubyy = xx - yy;
 	assign xy2 = xy * 2'd2;
-	assign xxaddyy = xx + yy;
 endmodule
 
 // xxaddyy+x0, 2xy+y0
@@ -189,12 +259,54 @@ module mandelbrot_compute_2 (
 	assign y = xy2 + y0;
 endmodule
 
-// TODO Just for fun, a reorder buffer could be added to the output
-module mandelbrot_writeback (
-	input [31:0] xxaddyy,
-	input [31:0] imax
+// x*x, y*y
+module mandelbrot_compute_3 (
+	input [31:0] xin,
+	input [31:0] yin,
+	output [31:0] xout,
+	output [31:0] yout
 );
+	assign xout = xin*xin;
+	assign yout = yin*yin;
+endmodule
 
+// xx+yy
+module mandelbrot_compute_4 (
+	input [31:0] xin,
+	input [31:0] yin,
+	output [31:0] xxaddyy
+);
+	assign xxaddyy = xin + yin;
+endmodule
+
+module mandelbrot_dispatch (
+	input [31:0] xin,
+	input [31:0] yin,
+	input ret,
+	input [31:0] retx,
+	input [31:0] rety,
+	input [31:0] reti,
+	output [31:0] xout,
+	output [31:0] yout,
+	output [31:0] iout
+);
+	assign xout = ret ? retx : xin;
+	assign yout = ret ? rety : yin;
+	assign iout = ret ? reti : 32'd0;
+endmodule
+
+// TODO Reorder buffer on output
+module mandelbrot_writeback #(parameter IMAX = 16) (
+	input [31:0] xxaddyy,
+	input [31:0] i,
+	output ret,
+	output [31:0] ipp
+);
+	wire a,b;
+	assign a = xxaddyy <= 4;
+	assign b = i < IMAX;
+	assign ret = a && b;
+	assign ipp = i + 1'b1;
 endmodule
 
 module mandelbrot_fxp_mul (
@@ -209,7 +321,7 @@ endmodule
 
 // It'd be better to use the vendor's FIFO IP, but it doesn't matter here really
 module mandelbrot_fifo #(parameter SIZE = 15) (
-	input [31:0] clk,
+	input clk,
 	input [31:0] in,
 	output [31:0] out
 );
@@ -217,7 +329,7 @@ module mandelbrot_fifo #(parameter SIZE = 15) (
 	reg [3:0] p = 4'd0;
 	always @(posedge clk) begin
 		mem[p] <= in;
-		p <= (p + 1'b1) % SIZE-1;
+		p <= (p + 1'b1) % SIZE;
 	end
-	assign out = mem[p+1'b1];
+	assign out = mem[(p+1'b1)%SIZE];
 endmodule
