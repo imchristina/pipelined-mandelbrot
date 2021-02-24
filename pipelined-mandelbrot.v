@@ -83,12 +83,12 @@ module mandelbrot #(
 		staged_y_2 <= staged_y_1;
 
 		// Module outputs
-		next_in <= ret || flush;
-		next_out <= ret && ~flush;
+		next_in <= ~ret || flush;
+		next_out <= ~ret && ~flush;
 		if (~ret) begin
 			xout <= staged_xin_out;
 			yout <= staged_yin_out;
-			i <= ret_i;
+			i <= output_2_iin;
 		end
 
 		// Flushing counter
@@ -205,6 +205,12 @@ module mandelbrot #(
 		.i(output_2_iin),
 		.ret(ret),
 		.ipp(ret_i)
+	);
+
+	reg [10:0] least_input_x,least_input_y;
+	mandelbrot_fifo #(15,1+11+11+32) output_reorder (
+		.clk(clk),
+		.in({~ret})
 	);
 endmodule
 

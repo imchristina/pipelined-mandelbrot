@@ -1,6 +1,7 @@
 `include "pipelined-mandelbrot.v"
-`define RESX 8
-`define RESY 8
+`define RESX 128
+`define RESY 128
+`define IMAX 2
 
 module testbench ();
 	reg clk = 0;
@@ -19,7 +20,7 @@ module testbench ();
 		end
 	end
 
-	mandelbrot #(`RESX,`RESY) mandelbrot_test (
+	mandelbrot #(`RESX,`RESY,`IMAX) mandelbrot_test (
         .clk(clk),
         .xin(xin),
         .yin(yin),
@@ -32,10 +33,22 @@ module testbench ();
 
 	testbench_pipeline mandelbrot_pipeline_test ();
 
+	integer f;
 	initial begin
+		f = $fopen("output.ppm", "wb");
+		$fwrite(f, "P3\n%0d %0d\n%0d\n",`RESX,`RESY,`IMAX);
 		$dumpfile("testbench.vcd");
 		$dumpvars(0, testbench);
-		#10000 $finish;
+		#100000 $finish;
+	end
+
+	reg f_done = 0;
+	always @(posedge clk) begin
+		if (next_out && ~f_done) begin
+			$fwrite(f,"%0d %0d %0d ",i,i,i);
+			if (xout == `RESX-1 && yout == `RESY-1)
+				f_done <= 1;
+		end
 	end
 endmodule
 
