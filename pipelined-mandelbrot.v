@@ -3,103 +3,127 @@
 
 module mandelbrot #(
 	parameter [10:0] RESX = 0,
-	parameter [10:0] RESY = 0
+	parameter [10:0] RESY = 0,
+	parameter [15:0] IMAX = 15
 ) (
 	input clk,
 	input [10:0] xin,
 	input [10:0] yin,
-	output in_enable,
-	output [10:0] xout,
-	output [10:0] yout,
-	output [31:0] v
+	output reg next_in,
+	output reg next_out,
+	output reg [10:0] xout,
+	output reg [10:0] yout,
+	output reg [15:0] i
 );
-	// Inter-stage connections
-	reg [10:0] input_0_xin,input_0_yin;
-	wire [31:0] input_0_xout, input_0_yout;
-
-	reg [31:0] input_1_xin,input_1_yin;
-	wire [31:0] input_1_xout,input_1_yout;
-
-	reg [31:0] input_2_xin,input_2_yin;
-	wire [31:0] input_2_xout,input_2_yout;
-
-	reg dispatch_retin;
-	reg [31:0] dispatch_xin,dispatch_yin,dispatch_retxin,dispatch_retyin,
-		dispatch_retiin;
-	wire [31:0] dispatch_xout,dispatch_yout,dispatch_iout;
-
-	reg [31:0] compute_0_xin,compute_0_yin;
-	wire [31:0] compute_0_xxout,compute_0_yyout,compute_0_xyout;
-
-	reg [31:0] compute_1_xxin,compute_1_yyin,compute_1_xyin;
-	wire [31:0] compute_1_xxsubyyout,compute_1_xy2out;
-
-	reg [31:0] compute_2_xxsubyyin,compute_2_xy2in;
-	wire [31:0] compute_2_x0in,compute_2_y0in,compute_2_xout,compute_2_yout;
-
-	reg [31:0] compute_3_xin,compute_3_yin;
-	wire [31:0] compute_3_xxout,compute_3_yyout;
-
-	reg [31:0] compute_4_xxin,compute_4_yyin;
-	wire [31:0] compute_4_xxaddyyout;
-
-	reg [31:0] writeback_xxaddyyin;
-	wire writeback_retout;
-	wire [31:0] writeback_ippout,writeback_iin;
-
 	// Clocked logic
 	always @(posedge clk) begin
-		if (~writeback_retout) begin
-			input_0_xin <= xin;
-			input_0_yin <= yin;
+		// Only iterate input stages if not returning or if flushing pipeline
+		if (~ret || flush) begin
+			// Input stage 0
+			input_xin <= xin;
+			input_yin <= yin;
 
+			// Input stage 1
 			input_1_xin <= input_0_xout;
 			input_1_yin <= input_0_yout;
 
+			// Input stage 2
 			input_2_xin <= input_1_xout;
 			input_2_yin <= input_1_yout;
-
-			dispatch_xin <= input_2_xout;
-			dispatch_yin <= input_2_yout;
 		end
 
-		dispatch_retin <= writeback_retout;
-		dispatch_retiin <= writeback_ippout;
+		// Compute stage 0
+		compute_xin <= ret && ~flush ? staged_x_2 : 32'd0;
+		compute_yin <= ret && ~flush ? staged_y_2 : 32'd0;
+		staged_x0_0 <= ret && ~flush ? staged_x0_5 : input_x0;
+		staged_y0_0 <= ret && ~flush ? staged_y0_5 : input_y0;
+		staged_i_0 <= ret && ~flush ? ret_i : 16'd0;
 
-		compute_0_xin <= dispatch_xout;
-		compute_0_yin <= dispatch_yout;
+		// Compute stage 1
+		compute_1_xxin <= compute_xx;
+		compute_1_yyin <= compute_yy;
+		compute_1_xyin <= compute_xy;
+		staged_x0_1 <= staged_x0_0;
+		staged_y0_1 <= staged_y0_0;
+		staged_i_1 <= staged_i_0;
 
-		compute_1_xxin <= compute_0_xxout;
-		compute_1_yyin <= compute_0_yyout;
-		compute_1_xyin <= compute_0_xyout;
+		// Compute stage 2
+		compute_2_xxsubyyin <= compute_xxsubyy;
+		compute_2_xy2in <= compute_xy2;
+		compute_2_x0in <= staged_x0_1;
+		compute_2_y0in <= staged_y0_1;
+		staged_x0_2 <= staged_x0_1;
+		staged_y0_2 <= staged_y0_1;
+		staged_i_2 <= staged_i_1;
 
-		compute_2_xxsubyyin <= compute_1_xxsubyyout;
-		compute_2_xy2in	<= compute_1_xy2out;
+		// Output stage 0
+		output_xin <= compute_xout;
+		output_yin <= compute_yout;
+		staged_x0_3 <= staged_x0_2;
+		staged_y0_3 <= staged_y0_2;
+		staged_i_3 <= staged_i_2;
+		staged_x_0 <= compute_xout;
+		staged_y_0 <= compute_yout;
 
-		compute_3_xin <= compute_2_xout;
-		compute_3_yin <= compute_2_yout;
+		// Output stage 1
+		output_1_xxin <= output_xx;
+		output_1_yyin <= output_yy;
+		staged_x0_4 <= staged_x0_3;
+		staged_y0_4 <= staged_y0_3;
+		staged_i_4 <= staged_i_3;
+		staged_x_1 <= staged_x_0;
+		staged_y_1 <= staged_y_0;
 
-		compute_4_xxin <= compute_3_xxout;
-		compute_4_yyin <= compute_3_yyout;
+		// Output stage 2
+		output_2_xxaddyyin <= output_xxaddyy;
+		output_2_iin <= staged_i_4;
+		staged_x0_5 <= staged_x0_4;
+		staged_y0_5 <= staged_y0_4;
+		staged_x_2 <= staged_x_1;
+		staged_y_2 <= staged_y_1;
 
-		writeback_xxaddyyin <= compute_4_xxaddyyout;
+		// Module outputs
+		next_in <= ret || flush;
+		next_out <= ret && ~flush;
+		if (~ret) begin
+			xout <= staged_xin_out;
+			yout <= staged_yin_out;
+			i <= ret_i;
+		end
+
+		// Flushing counter
+		if (flush)
+			flush_counter <= flush_counter + 1'b1;
 	end
 
-	// FIFOs
-	mandelbrot_fifo #(3) x0delay (clk,compute_0_xin,compute_2_x0in);
-	mandelbrot_fifo #(3) y0delay (clk,compute_0_yin,compute_2_y0in);
-	mandelbrot_fifo #(6) idelay (clk,dispatch_iout,writeback_iin);
-	mandelbrot_fifo #(4) retxdelay (clk,compute_2_xout,dispatch_retxin);
-	mandelbrot_fifo #(4) retydelay (clk,compute_2_yout,dispatch_retyin);
+	// Modules and connecting wires/regs
+	reg [4:0] flush_counter = 0;
+	wire flush;
+	assign flush = flush_counter <= 9;
 
-	// Modules
+	wire [10:0] staged_xin_out,staged_yin_out;
+	mandelbrot_fifo #(9,10) staged_xin (
+		.clk(clk),
+		.in(ret ? staged_xin_out : xin),
+		.out(staged_xin_out)
+	);
+	mandelbrot_fifo #(9,10) staged_yin (
+		.clk(clk),
+		.in(ret ? staged_yin_out : yin),
+		.out(staged_yin_out)
+	);
+
+	reg [10:0] input_xin,input_yin;
+	wire [31:0] input_0_xout,input_0_yout;
 	mandelbrot_input_0 #(RESX, RESY) input_0 (
-		.xin(input_0_xin),
-		.yin(input_0_yin),
+		.xin(input_xin),
+		.yin(input_yin),
 		.xout(input_0_xout),
 		.yout(input_0_yout)
 	);
 
+	reg [31:0] input_1_xin,input_1_yin;
+	wire [31:0] input_1_xout,input_1_yout;
 	mandelbrot_input_1 input_1 (
 		.xin(input_1_xin),
 		.yin(input_1_yin),
@@ -107,72 +131,81 @@ module mandelbrot #(
 		.yout(input_1_yout)
 	);
 
+	reg [31:0] input_2_xin,input_2_yin;
+	wire [31:0] input_x0,input_y0;
 	mandelbrot_input_2 input_2 (
 		.xin(input_2_xin),
 		.yin(input_2_yin),
-		.xout(input_2_xout),
-		.yout(input_2_yout)
+		.xout(input_x0),
+		.yout(input_y0)
 	);
 
-	mandelbrot_dispatch dispatch (
-		.xin(dispatch_xin),
-		.yin(dispatch_yin),
-		.ret(dispatch_retin),
-		.retx(dispatch_retxin),
-		.rety(dispatch_retyin),
-		.reti(dispatch_retiin),
-		.xout(dispatch_xout),
-		.yout(dispatch_yout),
-		.iout(dispatch_iout)
-	);
+	reg [31:0] staged_x0_0,staged_y0_0,staged_x0_1,staged_y0_1,
+		staged_x0_2,staged_y0_2,staged_x0_3,staged_y0_3,staged_x0_4,
+		staged_y0_4,staged_x0_5,staged_y0_5;
+	reg [15:0] staged_i_0,staged_i_1,staged_i_2,staged_i_3,staged_i_4;
 
+	reg [31:0] compute_xin,compute_yin;
+	wire [31:0] compute_xx,compute_yy,compute_xy;
 	mandelbrot_compute_0 compute_0 (
-		.x(compute_0_xin),
-		.y(compute_0_yin),
-		.xx(compute_0_xxout),
-		.yy(compute_0_yyout),
-		.xy(compute_0_xyout)
+		.x(compute_xin),
+		.y(compute_yin),
+		.xx(compute_xx),
+		.yy(compute_yy),
+		.xy(compute_xy)
 	);
 
+	reg [31:0] compute_1_xxin,compute_1_yyin,compute_1_xyin;
+	wire [31:0] compute_xxsubyy,compute_xy2;
 	mandelbrot_compute_1 compute_1 (
 		.xx(compute_1_xxin),
 		.yy(compute_1_yyin),
 		.xy(compute_1_xyin),
-		.xxsubyy(compute_1_xxsubyyout),
-		.xy2(compute_1_xy2out)
+		.xxsubyy(compute_xxsubyy),
+		.xy2(compute_xy2)
 	);
 
+	reg [31:0] compute_2_xxsubyyin,compute_2_xy2in,compute_2_x0in,compute_2_y0in;
+	wire [31:0] compute_xout,compute_yout;
 	mandelbrot_compute_2 compute_2 (
 		.xxsubyy(compute_2_xxsubyyin),
 		.xy2(compute_2_xy2in),
 		.x0(compute_2_x0in),
 		.y0(compute_2_y0in),
-		.x(compute_2_xout),
-		.y(compute_2_yout)
+		.x(compute_xout),
+		.y(compute_yout)
 	);
 
-	mandelbrot_compute_3 compute_3 (
-		.xin(compute_3_xin),
-		.yin(compute_3_yin),
-		.xout(compute_3_xxout),
-		.yout(compute_3_yyout)
+	reg [31:0] staged_x_0,staged_y_0,staged_x_1,staged_y_1,staged_x_2,
+		staged_y_2;
+
+	reg [31:0] output_xin,output_yin;
+	wire [31:0] output_xx,output_yy;
+	mandelbrot_output_0 output_0 (
+		.xin(output_xin),
+		.yin(output_yin),
+		.xxout(output_xx),
+		.yyout(output_yy)
 	);
 
-	mandelbrot_compute_4 compute_4 (
-		.xin(compute_4_xxin),
-		.yin(compute_4_yyin),
-		.xxaddyy(compute_4_xxaddyyout)
+	reg [31:0] output_1_xxin,output_1_yyin;
+	wire [31:0] output_xxaddyy;
+	mandelbrot_output_1 output_1 (
+		.xin(output_1_xxin),
+		.yin(output_1_yyin),
+		.xxaddyy(output_xxaddyy)
 	);
 
-	mandelbrot_writeback writeback (
-		.xxaddyy(writeback_xxaddyyin),
-		.i(writeback_iin),
-		.ret(writeback_retout),
-		.ipp(writeback_ippout)
+	reg [31:0] output_2_xxaddyyin;
+	reg [15:0] output_2_iin;
+	wire ret;
+	wire [15:0] ret_i;
+	mandelbrot_output_2 #(IMAX) output_2 (
+		.xxaddyy(output_2_xxaddyyin),
+		.i(output_2_iin),
+		.ret(ret),
+		.ipp(ret_i)
 	);
-
-	assign in_enable = ~writeback_retout;
-	assign v = dispatch_retiin;
 endmodule
 
 // Convert input to normalized fixed point
@@ -229,8 +262,8 @@ module mandelbrot_compute_0 (
 	output [31:0] yy,
 	output [31:0] xy
 );
-	mandelbrot_fxp_mul xx_mul (x, x, xx);
-	mandelbrot_fxp_mul yy_mul (y, y, yy);
+	mandelbrot_fxp_mul compute_xx_mul (x, x, xx);
+	mandelbrot_fxp_mul compute_yy_mul (y, y, yy);
 	mandelbrot_fxp_mul xy_mul (x, y, xy);
 endmodule
 
@@ -246,7 +279,7 @@ module mandelbrot_compute_1 (
 	assign xy2 = xy * 2'd2;
 endmodule
 
-// xxaddyy+x0, 2xy+y0
+// x = xxaddyy+x0, y = 2xy+y0
 module mandelbrot_compute_2 (
 	input [31:0] xxsubyy,
 	input [31:0] xy2,
@@ -260,18 +293,18 @@ module mandelbrot_compute_2 (
 endmodule
 
 // x*x, y*y
-module mandelbrot_compute_3 (
+module mandelbrot_output_0 (
 	input [31:0] xin,
 	input [31:0] yin,
-	output [31:0] xout,
-	output [31:0] yout
+	output [31:0] xxout,
+	output [31:0] yyout
 );
-	assign xout = xin*xin;
-	assign yout = yin*yin;
+	mandelbrot_fxp_mul output_xx_mul (xin, xin, xxout);
+	mandelbrot_fxp_mul output_yy_mul (yin, yin, yyout);
 endmodule
 
 // xx+yy
-module mandelbrot_compute_4 (
+module mandelbrot_output_1 (
 	input [31:0] xin,
 	input [31:0] yin,
 	output [31:0] xxaddyy
@@ -279,31 +312,16 @@ module mandelbrot_compute_4 (
 	assign xxaddyy = xin + yin;
 endmodule
 
-module mandelbrot_dispatch (
-	input [31:0] xin,
-	input [31:0] yin,
-	input ret,
-	input [31:0] retx,
-	input [31:0] rety,
-	input [31:0] reti,
-	output [31:0] xout,
-	output [31:0] yout,
-	output [31:0] iout
-);
-	assign xout = ret ? retx : xin;
-	assign yout = ret ? rety : yin;
-	assign iout = ret ? reti : 32'd0;
-endmodule
-
 // TODO Reorder buffer on output
-module mandelbrot_writeback #(parameter IMAX = 16) (
+module mandelbrot_output_2 #(parameter IMAX = 16) (
 	input [31:0] xxaddyy,
-	input [31:0] i,
+	input [15:0] i,
 	output ret,
-	output [31:0] ipp
+	output [15:0] ipp
 );
 	wire a,b;
-	assign a = xxaddyy <= 4;
+	// Signed compare xxaddyy <= 4
+	assign a = (xxaddyy <= {1'b0,3'd4,27'd0} || xxaddyy[31]);
 	assign b = i < IMAX;
 	assign ret = a && b;
 	assign ipp = i + 1'b1;
@@ -314,18 +332,19 @@ module mandelbrot_fxp_mul (
 	input [31:0] b,
 	output [31:0] c
 );
-	wire [63:0] result;
-	assign result = a * b;
-	assign c = result[63:32];
+	wire [63:0] a_sx,b_sx,result;
+	assign a_sx = {{32{a[31]}},a};
+	assign b_sx = {{32{b[31]}},b};
+	assign result = a_sx * b_sx;
+	assign c = {result[63],result[58:28]};
 endmodule
 
-// It'd be better to use the vendor's FIFO IP, but it doesn't matter here really
-module mandelbrot_fifo #(parameter SIZE = 15) (
+module mandelbrot_fifo #(parameter SIZE = 15,parameter XLEN = 31) (
 	input clk,
-	input [31:0] in,
-	output [31:0] out
+	input [XLEN:0] in,
+	output [XLEN:0] out
 );
-	reg [31:0] mem [SIZE:0];
+	reg [XLEN:0] mem [SIZE:0];
 	reg [3:0] p = 4'd0;
 	always @(posedge clk) begin
 		mem[p] <= in;
