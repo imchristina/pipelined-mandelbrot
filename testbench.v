@@ -1,53 +1,75 @@
-`include "pipelined-mandelbrot.v"
-`define RESX 128
-`define RESY 128
-`define IMAX 2
+`include "mandelbrot.v"
+`define RESX 32
+`define RESY 32
+`define IMAX 8
 
 module testbench ();
 	reg clk = 0;
 	always #1 clk = ~clk;
 
-    wire next_in,next_out;
-    wire [10:0] xout,yout;
-    wire [15:0] i;
+    wire output_ready;
+    wire [80:0] pin,pout;
+	reg [80:0] fb [`RESX:0][`RESY:0];
 
-	reg [10:0] xin = 0,yin = 0;
-	always @(negedge clk) begin
-		if (next_in) begin
-			xin <= (xin + 1) % `RESX;
-			if (xin == 0)
-				yin <= (yin + 1) % `RESY;
+	reg [10:0] xout=0,yout=0;
+	always @(posedge clk) begin
+		if (output_ready) begin
+			fb[xout][yout] <= pout;
 		end
 	end
+
+	reg [10:0] xin = 0,yin = 0;
+	reg fb_init = 1'b0;
+	always @(negedge clk) begin
+		xin <= xin + 1;
+		if (xin == `RESX-1) begin
+			yin <= (yin + 1) % `RESY;
+			xin <= 0;
+		end
+		if (output_ready) begin
+			xout <= xout + 1;
+			if (xout >= `RESX-1) begin
+				yout <= yout+1;
+				if (yout >= `RESY-1) begin
+					fb_init <= 1;
+					yout <= 0;
+				end
+				xout <= 0;
+			end
+		end
+	end
+
+	assign pin = fb_init ? fb[xin][yin] : '0;
 
 	mandelbrot #(`RESX,`RESY,`IMAX) mandelbrot_test (
         .clk(clk),
         .xin(xin),
         .yin(yin),
-        .next_in(next_in),
-		.next_out(next_out),
-        .xout(xout),
-        .yout(yout),
-        .i(i)
+		.output_ready(output_ready),
+		.pin(pin),
+        .pout(pout)
     );
 
 	testbench_pipeline mandelbrot_pipeline_test ();
 
-	integer f;
+	reg [15:0] v;
+	integer f,x,y;
 	initial begin
 		f = $fopen("output.ppm", "wb");
 		$fwrite(f, "P3\n%0d %0d\n%0d\n",`RESX,`RESY,`IMAX);
 		$dumpfile("testbench.vcd");
 		$dumpvars(0, testbench);
-		#100000 $finish;
-	end
-
-	reg f_done = 0;
-	always @(posedge clk) begin
-		if (next_out && ~f_done) begin
-			$fwrite(f,"%0d %0d %0d ",i,i,i);
-			if (xout == `RESX-1 && yout == `RESY-1)
-				f_done <= 1;
+		#100000 begin
+			for (x=0;x<`RESX;x++) begin
+				for (y=0;y<`RESY;y++) begin
+					v = fb[x][y][15:0];
+					if (v === 16'bxxxxxxxxxxxxxxxx)
+						$fwrite(f,"%0d 0 0 ",`IMAX);
+					else
+						$fwrite(f,"%0d %0d %0d ",v,v,v);
+				end
+			end
+			$finish;
 		end
 	end
 endmodule

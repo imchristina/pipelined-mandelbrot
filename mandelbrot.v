@@ -9,108 +9,104 @@ module mandelbrot #(
 	input clk,
 	input [10:0] xin,
 	input [10:0] yin,
-	output reg next_in,
-	output reg next_out,
-	output reg [10:0] xout,
-	output reg [10:0] yout,
-	output reg [15:0] i
+	input [80:0] pin,
+	output output_ready,
+	output [80:0] pout
 );
+	// Unpack input
+	wire unpacked_f;
+	wire [31:0] unpacked_x,unpacked_y;
+	wire [15:0] unpacked_i;
+	assign unpacked_f = pin[80];
+	assign unpacked_x = pin[79:48];
+	assign unpacked_y = pin[47:16];
+	assign unpacked_i = pin[15:0];
+
 	// Clocked logic
 	always @(posedge clk) begin
-		// Only iterate input stages if not returning or if flushing pipeline
-		if (~ret || flush) begin
-			// Input stage 0
-			input_xin <= xin;
-			input_yin <= yin;
+		// Input stage 0
+		input_xin <= xin;
+		input_yin <= yin;
 
-			// Input stage 1
-			input_1_xin <= input_0_xout;
-			input_1_yin <= input_0_yout;
+		// Input stage 1
+		input_1_xin <= input_0_xout;
+		input_1_yin <= input_0_yout;
 
-			// Input stage 2
-			input_2_xin <= input_1_xout;
-			input_2_yin <= input_1_yout;
-		end
+		// Input stage 2
+		input_2_xin <= input_1_xout;
+		input_2_yin <= input_1_yout;
 
 		// Compute stage 0
-		compute_xin <= ret && ~flush ? staged_x_2 : 32'd0;
-		compute_yin <= ret && ~flush ? staged_y_2 : 32'd0;
-		staged_x0_0 <= ret && ~flush ? staged_x0_5 : input_x0;
-		staged_y0_0 <= ret && ~flush ? staged_y0_5 : input_y0;
-		staged_i_0 <= ret && ~flush ? ret_i : 16'd0;
 
 		// Compute stage 1
 		compute_1_xxin <= compute_xx;
 		compute_1_yyin <= compute_yy;
 		compute_1_xyin <= compute_xy;
-		staged_x0_1 <= staged_x0_0;
-		staged_y0_1 <= staged_y0_0;
-		staged_i_1 <= staged_i_0;
+
 
 		// Compute stage 2
 		compute_2_xxsubyyin <= compute_xxsubyy;
 		compute_2_xy2in <= compute_xy2;
-		compute_2_x0in <= staged_x0_1;
-		compute_2_y0in <= staged_y0_1;
-		staged_x0_2 <= staged_x0_1;
-		staged_y0_2 <= staged_y0_1;
-		staged_i_2 <= staged_i_1;
 
 		// Output stage 0
 		output_xin <= compute_xout;
 		output_yin <= compute_yout;
-		staged_x0_3 <= staged_x0_2;
-		staged_y0_3 <= staged_y0_2;
-		staged_i_3 <= staged_i_2;
-		staged_x_0 <= compute_xout;
-		staged_y_0 <= compute_yout;
 
 		// Output stage 1
 		output_1_xxin <= output_xx;
 		output_1_yyin <= output_yy;
-		staged_x0_4 <= staged_x0_3;
-		staged_y0_4 <= staged_y0_3;
-		staged_i_4 <= staged_i_3;
-		staged_x_1 <= staged_x_0;
-		staged_y_1 <= staged_y_0;
 
 		// Output stage 2
 		output_2_xxaddyyin <= output_xxaddyy;
-		output_2_iin <= staged_i_4;
-		staged_x0_5 <= staged_x0_4;
-		staged_y0_5 <= staged_y0_4;
-		staged_x_2 <= staged_x_1;
-		staged_y_2 <= staged_y_1;
-
-		// Module outputs
-		next_in <= ~ret || flush;
-		next_out <= ~ret && ~flush;
-		if (~ret) begin
-			xout <= staged_xin_out;
-			yout <= staged_yin_out;
-			i <= output_2_iin;
-		end
 
 		// Flushing counter
-		if (flush)
+		if (~output_ready)
 			flush_counter <= flush_counter + 1'b1;
 	end
 
 	// Modules and connecting wires/regs
 	reg [4:0] flush_counter = 0;
-	wire flush;
-	assign flush = flush_counter <= 9;
+	assign output_ready = flush_counter > 8;
 
-	wire [10:0] staged_xin_out,staged_yin_out;
-	mandelbrot_fifo #(9,10) staged_xin (
+	mandelbrot_fifo #(5) staged_pxin (
 		.clk(clk),
-		.in(ret ? staged_xin_out : xin),
-		.out(staged_xin_out)
+		.in(unpacked_x),
+		.out(compute_xin)
 	);
-	mandelbrot_fifo #(9,10) staged_yin (
+	mandelbrot_fifo #(5) staged_pyin (
 		.clk(clk),
-		.in(ret ? staged_yin_out : yin),
-		.out(staged_yin_out)
+		.in(unpacked_y),
+		.out(compute_yin)
+	);
+	mandelbrot_fifo #(10,15) staged_pi (
+		.clk(clk),
+		.in(unpacked_i),
+		.out(output_2_iin)
+	);
+	mandelbrot_fifo #(10,0) staged_pf (
+		.clk(clk),
+		.in(unpacked_f),
+		.out(output_2_fin)
+	);
+	mandelbrot_fifo #(4) staged_x0 (
+		.clk(clk),
+		.in(input_x0),
+		.out(compute_2_x0in)
+	);
+	mandelbrot_fifo #(4) staged_y0 (
+		.clk(clk),
+		.in(input_y0),
+		.out(compute_2_y0in)
+	);
+	mandelbrot_fifo #(4) staged_pxout (
+		.clk(clk),
+		.in(compute_xout),
+		.out(pout[79:48])
+	);
+	mandelbrot_fifo #(4) staged_pyout (
+		.clk(clk),
+		.in(compute_yout),
+		.out(pout[47:16])
 	);
 
 	reg [10:0] input_xin,input_yin;
@@ -140,13 +136,7 @@ module mandelbrot #(
 		.yout(input_y0)
 	);
 
-	reg [31:0] staged_x0_0,staged_y0_0,staged_x0_1,staged_y0_1,
-		staged_x0_2,staged_y0_2,staged_x0_3,staged_y0_3,staged_x0_4,
-		staged_y0_4,staged_x0_5,staged_y0_5;
-	reg [15:0] staged_i_0,staged_i_1,staged_i_2,staged_i_3,staged_i_4;
-
-	reg [31:0] compute_xin,compute_yin;
-	wire [31:0] compute_xx,compute_yy,compute_xy;
+	wire [31:0] compute_xin,compute_yin,compute_xx,compute_yy,compute_xy;
 	mandelbrot_compute_0 compute_0 (
 		.x(compute_xin),
 		.y(compute_yin),
@@ -165,8 +155,8 @@ module mandelbrot #(
 		.xy2(compute_xy2)
 	);
 
-	reg [31:0] compute_2_xxsubyyin,compute_2_xy2in,compute_2_x0in,compute_2_y0in;
-	wire [31:0] compute_xout,compute_yout;
+	reg [31:0] compute_2_xxsubyyin,compute_2_xy2in;
+	wire [31:0] compute_2_x0in,compute_2_y0in,compute_xout,compute_yout;
 	mandelbrot_compute_2 compute_2 (
 		.xxsubyy(compute_2_xxsubyyin),
 		.xy2(compute_2_xy2in),
@@ -175,9 +165,6 @@ module mandelbrot #(
 		.x(compute_xout),
 		.y(compute_yout)
 	);
-
-	reg [31:0] staged_x_0,staged_y_0,staged_x_1,staged_y_1,staged_x_2,
-		staged_y_2;
 
 	reg [31:0] output_xin,output_yin;
 	wire [31:0] output_xx,output_yy;
@@ -197,20 +184,14 @@ module mandelbrot #(
 	);
 
 	reg [31:0] output_2_xxaddyyin;
-	reg [15:0] output_2_iin;
-	wire ret;
-	wire [15:0] ret_i;
+	wire [15:0] output_2_iin;
+	wire output_2_fin;
 	mandelbrot_output_2 #(IMAX) output_2 (
 		.xxaddyy(output_2_xxaddyyin),
-		.i(output_2_iin),
-		.ret(ret),
-		.ipp(ret_i)
-	);
-
-	reg [10:0] least_input_x,least_input_y;
-	mandelbrot_fifo #(15,1+11+11+32) output_reorder (
-		.clk(clk),
-		.in({~ret})
+		.iin(output_2_iin),
+		.fin(output_2_fin),
+		.iout(pout[15:0]),
+		.fout(pout[80])
 	);
 endmodule
 
@@ -318,19 +299,19 @@ module mandelbrot_output_1 (
 	assign xxaddyy = xin + yin;
 endmodule
 
-// TODO Reorder buffer on output
 module mandelbrot_output_2 #(parameter IMAX = 16) (
 	input [31:0] xxaddyy,
-	input [15:0] i,
-	output ret,
-	output [15:0] ipp
+	input [15:0] iin,
+	input fin,
+	output [15:0] iout,
+	output fout
 );
-	wire a,b;
-	// Signed compare xxaddyy <= 4
-	assign a = (xxaddyy <= {1'b0,3'd4,27'd0} || xxaddyy[31]);
-	assign b = i < IMAX;
-	assign ret = a && b;
-	assign ipp = i + 1'b1;
+	wire a,b,c;
+	assign a = xxaddyy[30:28] <= 4;
+	assign b = iin < IMAX;
+	assign c = a && b;
+	assign iout = iin + {15'd0,c && ~fin};
+	assign fout = fin || c;
 endmodule
 
 module mandelbrot_fxp_mul (
