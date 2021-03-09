@@ -1,9 +1,8 @@
-// Using fixed point, 1 sign bit + 3 integer bits, 28 decimal bits
+// Using fixed point, 1 sign bit + 8 integer bits, 23 decimal bits
 // Coordinate input is 11x11 bits for a maximum output resolution of 2048x2048
 
 module mandelbrot #(
-	parameter [10:0] RESX = 0,
-	parameter [10:0] RESY = 0,
+	parameter [3:0] RANGE = 0,
 	parameter [15:0] IMAX = 15
 ) (
 	input clk,
@@ -111,7 +110,7 @@ module mandelbrot #(
 
 	reg [10:0] input_xin,input_yin;
 	wire [31:0] input_0_xout,input_0_yout;
-	mandelbrot_input_0 #(RESX, RESY) input_0 (
+	mandelbrot_input_0 #(RANGE) input_0 (
 		.xin(input_xin),
 		.yin(input_yin),
 		.xout(input_0_xout),
@@ -197,8 +196,7 @@ endmodule
 
 // Convert input to normalized fixed point
 module mandelbrot_input_0 #(
-	parameter [10:0] RESX = 0,
-	parameter [10:0] RESY = 0
+	parameter [3:0] range = 2
 	) (
 	input [10:0] xin,
 	input [10:0] yin,
@@ -209,14 +207,8 @@ module mandelbrot_input_0 #(
 	assign xfxp = {1'b0,xin,20'd0};
 	assign yfxp = {1'b0,yin,20'd0};
 
-	wire [31:0] RESXFXP,RESYFXP,XCOEFF,YCOEFF;
-	assign RESXFXP = {1'b0,RESX,20'd0};
-	assign RESYFXP = {1'b0,RESY,20'd0};
-	assign XCOEFF = {1'b0,3'd1,28'd0}/RESXFXP;
-	assign YCOEFF = {1'b0,3'd1,28'd0}/RESYFXP;
-
-	assign xout = xfxp * XCOEFF;
-	assign yout = yfxp * YCOEFF;
+	assign xout = xfxp >> range;
+	assign yout = yfxp >> range;
 endmodule
 
 // x*3.5, y*2
@@ -226,7 +218,7 @@ module mandelbrot_input_1 (
 	output [31:0] xout,
 	output [31:0] yout
 );
-	mandelbrot_fxp_mul xin_mul (xin, {1'b0,3'd3,1'b1,27'd0}, xout);
+	mandelbrot_fxp_mul xin_mul (xin, {1'b0,8'd3,1'b1,22'd0}, xout);
 	assign yout = yin*2'd2;
 endmodule
 
@@ -237,8 +229,8 @@ module mandelbrot_input_2 (
 	output [31:0] xout,
 	output [31:0] yout
 );
-	assign xout = xin - {1'b0,3'd2,1'b1,27'd0};
-	assign yout = yin - {1'b0,3'd1,28'd0};
+	assign xout = xin - {1'b0,8'd2,1'b1,22'd0};
+	assign yout = yin - {1'b0,8'd1,23'd0};
 endmodule
 
 // x*x, y*y, x*y
@@ -266,7 +258,7 @@ module mandelbrot_compute_1 (
 	assign xy2 = xy * 2'd2;
 endmodule
 
-// x = xxaddyy+x0, y = 2xy+y0
+// x = xxsubyy+x0, y = 2xy+y0
 module mandelbrot_compute_2 (
 	input [31:0] xxsubyy,
 	input [31:0] xy2,
@@ -307,11 +299,11 @@ module mandelbrot_output_2 #(parameter IMAX = 16) (
 	output fout
 );
 	wire a,b,c;
-	assign a = xxaddyy[30:28] <= 4;
+	assign a = xxaddyy[30:23] <= 8'd4;
 	assign b = iin < IMAX;
 	assign c = a && b;
 	assign iout = iin + {15'd0,c && ~fin};
-	assign fout = fin || c;
+	assign fout = fin || ~c;
 endmodule
 
 module mandelbrot_fxp_mul (
@@ -320,10 +312,12 @@ module mandelbrot_fxp_mul (
 	output [31:0] c
 );
 	wire [63:0] a_sx,b_sx,result;
+	wire sign;
 	assign a_sx = {{32{a[31]}},a};
 	assign b_sx = {{32{b[31]}},b};
 	assign result = a_sx * b_sx;
-	assign c = {result[63],result[58:28]};
+	assign sign = result[63];
+	assign c = {sign,result[53:47],result[46:23]};
 endmodule
 
 module mandelbrot_fifo #(parameter SIZE = 15,parameter XLEN = 31) (
